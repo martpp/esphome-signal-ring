@@ -162,7 +162,8 @@ duration.
   home or everyone is asleep
 - [`automations.yaml`](homeassistant/examples/automations.yaml):
   - 3D printer (Bambu Lab): done, failed or paused; ends when the door opens or the next print starts
-  - washer (SmartThings): done; ends when the machine switches off or the next wash starts
+  - washer (SmartThings): done; ends when a door contact sensor reports the door open, or when
+    the next wash starts (the machine itself switches off on its own and reports nothing about the door)
   - kitchen timer
   - party mode: party effect while a helper is on, previous state restored afterwards
   - wake-up: yellow → turquoise → red over 45 minutes after the alarm, off when the blinds close again

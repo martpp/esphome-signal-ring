@@ -19,11 +19,12 @@
     - {trigger: state, entity_id: sensor.printer_print_status, to: [prepare, running], id: print_started}
     - {trigger: state, entity_id: sensor.printer_print_status, to: idle, id: print_idle}
     - {trigger: state, entity_id: binary_sensor.printer_door, from: "off", to: "on", id: print_door}
-    # Washer (SmartThings): the job state turns "finish"; the notification ends when the machine
-    # switches off (or after 30 minutes)
+    # Washer (SmartThings): the job state turns "finish". Many washers switch themselves off
+    # shortly after finishing and report nothing about the door, so a door contact sensor
+    # ends the notification when the door is opened (otherwise after 30 minutes).
     - {trigger: state, entity_id: sensor.washer_job_state, to: finish, id: washer_done}
     - {trigger: state, entity_id: sensor.washer_machine_state, to: run, id: washer_started}
-    - {trigger: state, entity_id: binary_sensor.washer_power, from: "on", to: "off", id: washer_off}
+    - {trigger: state, entity_id: binary_sensor.washer_door_contact, from: "off", to: "on", id: washer_door}
     # Timers
     - {trigger: event, event_type: timer.finished, event_data: {entity_id: timer.kitchen}, id: timer_done}
     # Going away or to bed ends whatever is shown
@@ -43,7 +44,7 @@
           sequence: [{action: script.signal_clear_if, data: {event: print_done}}]
         - conditions: [{condition: trigger, id: washer_done}]
           sequence: [{action: script.signal_event, data: {event: washer_done, duration: 1800}}]
-        - conditions: [{condition: trigger, id: [washer_started, washer_off]}]
+        - conditions: [{condition: trigger, id: [washer_started, washer_door]}]
           sequence: [{action: script.signal_clear_if, data: {event: washer}}]
         - conditions: [{condition: trigger, id: timer_done}]
           sequence: [{action: script.signal_event, data: {event: timer_done, duration: 60}}]
