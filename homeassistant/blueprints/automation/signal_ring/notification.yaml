@@ -1,0 +1,92 @@
+blueprint:
+  name: "Signal ring: notification"
+  description: >-
+    Shows a notification preset on one or more signal rings when an entity changes to a
+    state, e.g. the 3D printer reports "finish" or the washer goes from "run" to "stop".
+    When the entity leaves that state again, the notification ends and the ring returns to
+    what it showed before.
+  domain: automation
+  source_url: https://github.com/martpp/esphome-signal-ring/blob/main/homeassistant/blueprints/automation/signal_ring/notification.yaml
+  input:
+    trigger_entity:
+      name: Entity
+      description: The entity that triggers the notification (sensor, binary sensor, ...).
+      selector:
+        entity:
+    to_state:
+      name: Target state
+      description: Show the notification when the entity changes to this state (e.g. "on", "finish").
+      selector:
+        text:
+    event:
+      name: Notification
+      default: print_done
+      selector:
+        select:
+          options:
+            - {label: "3D printer done (green slow pulse)", value: print_done}
+            - {label: "3D printer problem (green with red dot)", value: print_error}
+            - {label: "Washer done (blue slow pulse)", value: washer_done}
+            - {label: "Timer done (white blink)", value: timer_done}
+    duration:
+      name: Maximum duration
+      description: End the notification after this time at the latest. 0 keeps it until it is cleared.
+      default: 1800
+      selector:
+        number:
+          min: 0
+          max: 86400
+          unit_of_measurement: s
+    clear_on_leave:
+      name: End when the entity leaves the state
+      default: true
+      selector:
+        boolean:
+    devices:
+      name: ESPHome device names
+      description: The "name:" of the rings in ESPHome, separated by commas.
+      default: signal-ring
+      selector:
+        text:
+
+mode: queued
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    not_from: [unavailable, unknown]
+    not_to: [unavailable, unknown]
+
+variables:
+  to_state: !input to_state
+  event: !input event
+  duration: !input duration
+  clear_on_leave: !input clear_on_leave
+  devices_input: !input devices
+  devices: "{{ devices_input.split(',') | map('trim') | reject('eq', '') | map('replace', '-', '_') | list }}"
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.to_state.state == to_state }}"
+        sequence:
+          - repeat:
+              for_each: "{{ devices }}"
+              sequence:
+                - action: "esphome.{{ repeat.item }}_event"
+                  continue_on_error: true
+                  data:
+                    event: "{{ event }}"
+                    duration: "{{ duration | int }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ clear_on_leave and trigger.from_state.state == to_state }}"
+        sequence:
+          - repeat:
+              for_each: "{{ devices }}"
+              sequence:
+                - action: "esphome.{{ repeat.item }}_clear_if"
+                  continue_on_error: true
+                  data:
+                    event: "{{ event }}"

@@ -1,0 +1,60 @@
+# Helper scripts that send a notification to all signal rings at once.
+# Paste into scripts.yaml (or create them in the UI in YAML mode) and list your rings.
+# Automations then call script.signal_event / script.signal_clear_if instead of each ring.
+
+signal_event:
+  alias: "Signal: event to all rings"
+  description: >-
+    Sends a notification preset to all signal rings, except while nobody is home or everyone
+    is asleep. Add new rings to the sequence.
+  icon: mdi:bell-ring
+  mode: parallel
+  fields:
+    event:
+      name: Event
+      required: true
+      example: print_done
+      selector:
+        select:
+          options: [print_done, print_error, washer_done, timer_done]
+    duration:
+      name: Duration (s, 0 = until cleared)
+      default: 0
+      selector:
+        number: {min: 0, max: 86400, unit_of_measurement: s}
+  sequence:
+    # Optional quiet conditions; remove them or use your own helpers.
+    - condition: state
+      entity_id: input_boolean.away
+      state: "off"
+    - condition: state
+      entity_id: input_boolean.awake
+      state: "on"
+    - action: esphome.hallway_signal_1_event
+      continue_on_error: true
+      data:
+        event: "{{ event }}"
+        duration: "{{ duration | default(0) | int }}"
+    # - action: esphome.kitchen_signal_1_event
+    #   continue_on_error: true
+    #   data: {event: "{{ event }}", duration: "{{ duration | default(0) | int }}"}
+
+signal_clear_if:
+  alias: "Signal: end notification (filtered)"
+  description: >-
+    Ends the notification on all rings if the active one starts with the given prefix
+    ("print" ends print_done and print_error, an empty prefix ends everything).
+  icon: mdi:bell-off
+  mode: parallel
+  fields:
+    event:
+      name: Event prefix
+      required: true
+      example: print
+      selector:
+        text:
+  sequence:
+    - action: esphome.hallway_signal_1_clear_if
+      continue_on_error: true
+      data:
+        event: "{{ event }}"

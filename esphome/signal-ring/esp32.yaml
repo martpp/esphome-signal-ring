@@ -1,0 +1,21 @@
+# Board package for an ESP32 (compile-tested; not yet tested on hardware).
+#
+# LED data on GPIO16 by default, driven by the RMT peripheral.
+
+substitutions:
+  led_pin: GPIO16
+
+packages:
+  core: !include core.yaml
+
+esp32:
+  board: esp32dev
+
+logger:
+
+light:
+  - id: !extend ring
+    platform: esp32_rmt_led_strip
+    chipset: WS2812
+    rgb_order: ${color_order}
+    pin: ${led_pin}

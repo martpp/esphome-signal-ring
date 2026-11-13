@@ -1,0 +1,25 @@
+# Board package for an ESP8266 (tested target: Wemos/LOLIN D1 mini).
+#
+# LED data on GPIO2 (D4): the hardware UART1 driver runs there without flicker while WiFi is busy.
+# GPIO2 also drives the blue on-board LED, which flashes briefly at boot. Serial logging is off
+# (logs work over WiFi).
+
+substitutions:
+  led_pin: GPIO2
+
+packages:
+  core: !include core.yaml
+
+esp8266:
+  board: d1_mini
+
+logger:
+  baud_rate: 0
+
+light:
+  - id: !extend ring
+    platform: neopixelbus
+    variant: WS2812
+    type: ${color_order}
+    method: esp8266_uart1
+    pin: ${led_pin}

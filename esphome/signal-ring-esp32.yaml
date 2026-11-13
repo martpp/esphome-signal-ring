@@ -1,0 +1,29 @@
+# Example device configuration for a signal ring on an ESP32.
+# Copy this file and the signal-ring/ folder into your ESPHome config directory and adjust it.
+# One file per ring; name them after the room, e.g. hallway-signal-1, kitchen-signal-1.
+
+substitutions:
+  name: signal-ring
+  friendly_name: Signal Ring
+  # Optional overrides (defaults in signal-ring/core.yaml and signal-ring/esp32.yaml):
+  # led_pin: GPIO16
+  # num_leds: "16"
+  # color_order: GRB
+
+packages:
+  signal_ring: !include signal-ring/esp32.yaml
+
+api:
+  encryption:
+    # Generate with: openssl rand -base64 32
+    key: !secret signal_ring_api_key
+
+ota:
+  - platform: esphome
+    password: !secret signal_ring_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    password: !secret signal_ring_ap_password

@@ -1,0 +1,301 @@
+# Signal ring core package: notification effects, presets and Home Assistant actions.
+# Board specifics (chip, LED driver, pin) live in esp8266.yaml / esp32.yaml, which include this file.
+#
+# Home Assistant actions (per device, "-" in the name becomes "_"):
+#   esphome.<name>_notify    red/green/blue (0-255), pattern, duration (s, 0 = until cleared)
+#                            pattern: solid | blink | fastblink | pulse | slowpulse | spin | dot
+#   esphome.<name>_event     event (preset, see the "event" action below), duration (s, 0 = until cleared)
+#                            event: print_done | print_error | washer_done | timer_done
+#   esphome.<name>_clear     end the notification and restore the previous light state
+#   esphome.<name>_clear_if  event: end it only if the active one starts with this prefix
+#                            ("print" ends print_done and print_error, "" ends everything)
+#
+# Text sensor "${status_name}": the active notification (none | notify | <event> | ha_down).
+# Without a Home Assistant API connection for ha_down_after_s the ring blinks red on its own
+# (event "ha_down") and stops as soon as Home Assistant is back.
+
+substitutions:
+  num_leds: "16"
+  color_order: GRB
+  light_name: "Light"
+  status_name: "Notification"
+  notify_brightness: "1.0"  # brightness of notifications, 0.0 - 1.0
+  dot_width: "5"            # width of the moving dot of the "dot" pattern (LEDs)
+  dot_gap: "1"              # dark LEDs in front of the dot (in running direction)
+  ha_down_after_s: "180"    # blink red after this many seconds without Home Assistant
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+ota:
+  - platform: web_server   # upload any .bin through http://<name>.local/
+
+web_server:
+  port: 80
+
+captive_portal:
+
+globals:
+  - { id: notifying, type: bool, initial_value: "false" }
+  # notification color and second color (the moving dot of "dot")
+  - { id: n_r, type: int, initial_value: "255" }
+  - { id: n_g, type: int, initial_value: "255" }
+  - { id: n_b, type: int, initial_value: "255" }
+  - { id: n2_r, type: int, initial_value: "255" }
+  - { id: n2_g, type: int, initial_value: "0" }
+  - { id: n2_b, type: int, initial_value: "0" }
+  # light state before the notification, restored afterwards
+  - { id: prev_on, type: bool, initial_value: "false" }
+  - { id: prev_r, type: float, initial_value: "1.0" }
+  - { id: prev_g, type: float, initial_value: "1.0" }
+  - { id: prev_b, type: float, initial_value: "1.0" }
+  - { id: prev_br, type: float, initial_value: "1.0" }
+  - { id: prev_effect, type: std::string, initial_value: '"None"' }
+  - { id: cur_event, type: std::string, initial_value: '"none"' }
+  - { id: api_lost_since, type: uint32_t, initial_value: "0" }
+
+# Detect a Home Assistant outage locally
+interval:
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            api.connected:
+          then:
+            - lambda: id(api_lost_since) = 0;
+            - if:
+                condition:
+                  lambda: return id(notifying) && id(cur_event) == "ha_down";
+                then:
+                  - script.stop: notify_run
+                  - script.execute: notify_restore
+          else:
+            - lambda: if (id(api_lost_since) == 0) id(api_lost_since) = millis();
+            - if:
+                condition:
+                  lambda: return id(cur_event) != "ha_down" && millis() - id(api_lost_since) > ${ha_down_after_s} * 1000UL;
+                then:
+                  - lambda: |-
+                      ESP_LOGW("signal", "No connection to Home Assistant -> ha_down");
+                      id(notify_run)->execute(255, 0, 0, std::string("blink"), 0);
+                      id(cur_event) = "ha_down";
+                      id(active_event).publish_state(id(cur_event));
+
+text_sensor:
+  - platform: template
+    id: active_event
+    name: "${status_name}"
+    icon: mdi:bell-ring
+    lambda: return id(cur_event);
+    update_interval: 60s
+
+light:
+  # Platform, pin and color order come from the board file (esp8266.yaml / esp32.yaml)
+  - id: ring
+    name: "${light_name}"
+    num_leds: ${num_leds}
+    default_transition_length: 0.5s
+    restore_mode: RESTORE_DEFAULT_OFF
+    effects:
+      - addressable_rainbow:
+      - addressable_color_wipe:
+      - addressable_twinkle:
+      - pulse:
+      - addressable_lambda:
+          name: "Party"
+          update_interval: 20ms
+          lambda: |-
+            // rotating half color wheel (stays saturated behind a diffuser) + sparks in the complementary color
+            static uint8_t spark[256] = {0};
+            int n = it.size();
+            uint8_t base = (millis() / 12) & 0xFF;
+            if (random_uint32() % 100 < 6) spark[random_uint32() % n] = 255;
+            for (int i = 0; i < n; i++) {
+              uint8_t h = base + i * 128 / n;
+              Color c = ESPHSVColor(h, 255, 255).to_rgb();
+              uint8_t a = spark[i];
+              if (a) {
+                Color k = ESPHSVColor(h + 128, 255, 255).to_rgb();
+                c = Color((c.r * (255 - a) + k.r * a) / 255, (c.g * (255 - a) + k.g * a) / 255, (c.b * (255 - a) + k.b * a) / 255);
+              }
+              it[i] = c;
+              spark[i] = a > 20 ? a - 20 : 0;
+            }
+      - addressable_lambda:
+          name: "Notify Solid"
+          update_interval: 100ms
+          lambda: it.all() = Color(id(n_r), id(n_g), id(n_b));
+      - addressable_lambda:
+          name: "Notify Blink"
+          update_interval: 50ms
+          lambda: |-
+            bool on = (millis() / 300) % 2 == 0;
+            it.all() = on ? Color(id(n_r), id(n_g), id(n_b)) : Color::BLACK;
+      - addressable_lambda:
+          name: "Notify Fast Blink"
+          update_interval: 20ms
+          lambda: |-
+            bool on = (millis() / 120) % 2 == 0;
+            it.all() = on ? Color(id(n_r), id(n_g), id(n_b)) : Color::BLACK;
+      - addressable_lambda:
+          name: "Notify Slow Pulse"
+          update_interval: 30ms
+          lambda: |-
+            // gamma correction already makes the curve perceptual; the 30 % floor avoids visible steps in the dark
+            float f = 0.5f - 0.5f * cosf(millis() * 2.0f * M_PI / 2500.0f);
+            f = 0.30f + 0.70f * f;
+            it.all() = Color(id(n_r) * f, id(n_g) * f, id(n_b) * f);
+      - addressable_lambda:
+          name: "Notify Dot"
+          update_interval: 40ms
+          lambda: |-
+            int n = it.size();
+            int pos = (millis() / 80) % n;
+            it.all() = Color(id(n_r), id(n_g), id(n_b));
+            for (int k = 1; k <= ${dot_gap}; k++)
+              it[(pos + ${dot_width} - 1 + k) % n] = Color::BLACK;
+            for (int k = 0; k < ${dot_width}; k++)
+              it[(pos + k) % n] = Color(id(n2_r), id(n2_g), id(n2_b));
+      - addressable_lambda:
+          name: "Notify Pulse"
+          update_interval: 30ms
+          lambda: |-
+            float f = 0.5f - 0.5f * cosf(millis() * 2.0f * M_PI / 1500.0f);
+            f = 0.05f + 0.95f * f;
+            it.all() = Color(id(n_r) * f, id(n_g) * f, id(n_b) * f);
+      - addressable_lambda:
+          name: "Notify Spin"
+          update_interval: 40ms
+          lambda: |-
+            int n = it.size();
+            int head = (millis() / 60) % n;
+            for (int i = 0; i < n; i++) {
+              int d = (head - i + n) % n;  // distance behind the head
+              float f = d < 5 ? 1.0f - d * 0.22f : 0.0f;
+              it[i] = Color(id(n_r) * f, id(n_g) * f, id(n_b) * f);
+            }
+
+script:
+  - id: notify_run
+    mode: restart
+    parameters:
+      red: int
+      green: int
+      blue: int
+      pattern: string
+      duration: int
+    then:
+      - lambda: |-
+          if (!id(notifying)) {
+            auto v = id(ring).remote_values;
+            id(prev_on) = v.is_on();
+            id(prev_r) = v.get_red();
+            id(prev_g) = v.get_green();
+            id(prev_b) = v.get_blue();
+            id(prev_br) = v.get_brightness();
+            id(prev_effect) = std::string(id(ring).get_effect_name());
+          }
+          id(notifying) = true;
+          id(n_r) = red; id(n_g) = green; id(n_b) = blue;
+      - light.turn_on:
+          id: ring
+          brightness: ${notify_brightness}
+          red: 1.0
+          green: 1.0
+          blue: 1.0
+          effect: !lambda |-
+            if (pattern == "blink") return std::string("Notify Blink");
+            if (pattern == "fastblink") return std::string("Notify Fast Blink");
+            if (pattern == "slowpulse") return std::string("Notify Slow Pulse");
+            if (pattern == "dot") return std::string("Notify Dot");
+            if (pattern == "spin") return std::string("Notify Spin");
+            if (pattern == "solid") return std::string("Notify Solid");
+            return std::string("Notify Pulse");
+      - if:
+          condition:
+            lambda: return duration > 0;
+          then:
+            - delay: !lambda return duration * 1000;
+            - script.execute: notify_restore
+
+  - id: notify_restore
+    mode: single
+    then:
+      - lambda: |-
+          id(notifying) = false;
+          id(cur_event) = "none";
+          id(active_event).publish_state(id(cur_event));
+      - if:
+          condition:
+            lambda: return id(prev_on);
+          then:
+            - light.turn_on:
+                id: ring
+                brightness: !lambda return id(prev_br);
+                red: !lambda return id(prev_r);
+                green: !lambda return id(prev_g);
+                blue: !lambda return id(prev_b);
+                effect: !lambda return id(prev_effect);
+          else:
+            - light.turn_off:
+                id: ring
+                transition_length: 0.3s
+
+api:
+  reboot_timeout: 0s  # keep running (and blinking) while Home Assistant is down
+  actions:
+    - action: notify
+      variables:
+        red: int
+        green: int
+        blue: int
+        pattern: string
+        duration: int
+      then:
+        - lambda: |-
+            id(n2_r) = 255; id(n2_g) = 0; id(n2_b) = 0;
+            id(cur_event) = "notify";
+            id(active_event).publish_state(id(cur_event));
+        - script.execute:
+            id: notify_run
+            red: !lambda return red;
+            green: !lambda return green;
+            blue: !lambda return blue;
+            pattern: !lambda return pattern;
+            duration: !lambda return duration;
+    - action: event
+      variables:
+        event: string
+        duration: int
+      then:
+        - lambda: |-
+            // Presets: color (r, g, b) and pattern; the second color (dot) is red
+            int r = 255, g = 255, b = 255; std::string pat = "blink";
+            id(n2_r) = 255; id(n2_g) = 0; id(n2_b) = 0;
+            if (event == "print_done")       { r = 0;   g = 255; b = 0;   pat = "slowpulse"; }
+            else if (event == "print_error") { r = 0;   g = 255; b = 0;   pat = "dot"; }
+            else if (event == "washer_done") { r = 0;   g = 0;   b = 255; pat = "slowpulse"; }
+            else if (event == "timer_done")  { r = 255; g = 255; b = 255; pat = "blink"; }
+            else ESP_LOGW("signal", "Unknown event '%s', using white blink", event.c_str());
+            id(cur_event) = event;
+            id(active_event).publish_state(id(cur_event));
+            id(notify_run)->execute(r, g, b, pat, duration);
+    - action: clear_if
+      variables:
+        event: string
+      then:
+        - if:
+            condition:
+              lambda: return id(notifying) && id(cur_event).rfind(event, 0) == 0;
+            then:
+              - script.stop: notify_run
+              - script.execute: notify_restore
+    - action: clear
+      then:
+        - script.stop: notify_run
+        - if:
+            condition:
+              lambda: return id(notifying);
+            then:
+              - script.execute: notify_restore

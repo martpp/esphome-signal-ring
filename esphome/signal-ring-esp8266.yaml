@@ -1,0 +1,30 @@
+# Example device configuration for a signal ring on an ESP8266 (D1 mini).
+# Copy this file and the signal-ring/ folder into your ESPHome config directory and adjust it.
+# One file per ring; name them after the room, e.g. hallway-signal-1, kitchen-signal-1.
+
+substitutions:
+  name: signal-ring
+  friendly_name: Signal Ring
+  # Optional overrides (defaults in signal-ring/core.yaml):
+  # num_leds: "16"
+  # color_order: GRB
+  # light_name: "Light"
+  # status_name: "Notification"
+
+packages:
+  signal_ring: !include signal-ring/esp8266.yaml
+
+api:
+  encryption:
+    # Generate with: openssl rand -base64 32
+    key: !secret signal_ring_api_key
+
+ota:
+  - platform: esphome
+    password: !secret signal_ring_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    password: !secret signal_ring_ap_password

@@ -1,0 +1,138 @@
+# Example automations for signal rings. They use the helper scripts from scripts.yaml.
+# Entity IDs are placeholders: replace them with yours (Developer tools → States).
+#
+# - Notifications: 3D printer (Bambu Lab integration), washer (SmartThings), timers
+# - Party: party effect while a helper is on
+# - Wake-up: color fade after the alarm, ends when the bedroom blinds close again
+
+- id: signal_notifications
+  alias: "Signal: notifications"
+  description: Drives the signal rings for 3D printer, washer and timers.
+  mode: queued
+  max: 20
+  triggers:
+    # 3D printer (Bambu Lab): print status
+    - {trigger: state, entity_id: sensor.printer_print_status, from: running, to: finish, id: print_done}
+    - {trigger: state, entity_id: sensor.printer_print_status, to: failed, id: print_error}
+    - {trigger: state, entity_id: sensor.printer_print_status, from: running, to: pause, id: print_error}
+    - {trigger: state, entity_id: binary_sensor.printer_print_error, from: "off", to: "on", id: print_error}
+    - {trigger: state, entity_id: sensor.printer_print_status, to: [prepare, running], id: print_started}
+    - {trigger: state, entity_id: sensor.printer_print_status, to: idle, id: print_idle}
+    - {trigger: state, entity_id: binary_sensor.printer_door, from: "off", to: "on", id: print_door}
+    # Washer (SmartThings): the job state turns "finish"; the notification ends when the machine
+    # switches off (or after 30 minutes)
+    - {trigger: state, entity_id: sensor.washer_job_state, to: finish, id: washer_done}
+    - {trigger: state, entity_id: sensor.washer_machine_state, to: run, id: washer_started}
+    - {trigger: state, entity_id: binary_sensor.washer_power, from: "on", to: "off", id: washer_off}
+    # Timers
+    - {trigger: event, event_type: timer.finished, event_data: {entity_id: timer.kitchen}, id: timer_done}
+    # Going away or to bed ends whatever is shown
+    - {trigger: state, entity_id: input_boolean.away, from: "off", to: "on", id: quiet}
+    - {trigger: state, entity_id: input_boolean.awake, from: "on", to: "off", id: quiet}
+  actions:
+    - choose:
+        - conditions: [{condition: trigger, id: print_done}]
+          sequence: [{action: script.signal_event, data: {event: print_done, duration: 7200}}]
+        - conditions: [{condition: trigger, id: print_error}]
+          sequence: [{action: script.signal_event, data: {event: print_error, duration: 0}}]
+        - conditions: [{condition: trigger, id: print_started}]
+          sequence: [{action: script.signal_clear_if, data: {event: print}}]
+        - conditions: [{condition: trigger, id: print_idle}]
+          sequence: [{action: script.signal_clear_if, data: {event: print_error}}]
+        - conditions: [{condition: trigger, id: print_door}]
+          sequence: [{action: script.signal_clear_if, data: {event: print_done}}]
+        - conditions: [{condition: trigger, id: washer_done}]
+          sequence: [{action: script.signal_event, data: {event: washer_done, duration: 1800}}]
+        - conditions: [{condition: trigger, id: [washer_started, washer_off]}]
+          sequence: [{action: script.signal_clear_if, data: {event: washer}}]
+        - conditions: [{condition: trigger, id: timer_done}]
+          sequence: [{action: script.signal_event, data: {event: timer_done, duration: 60}}]
+        - conditions: [{condition: trigger, id: quiet}]
+          sequence: [{action: script.signal_clear_if, data: {event: ""}}]
+
+- id: signal_party
+  alias: "Signal: party"
+  description: Party effect on all rings while the party helper is on, then restore the previous state.
+  mode: restart
+  variables:
+    lights: [light.hallway_signal_1_light]
+    sensors: [sensor.hallway_signal_1_notification]
+  triggers:
+    - {trigger: state, entity_id: input_boolean.party_mode, from: "off", to: "on", id: "on"}
+    - {trigger: state, entity_id: input_boolean.party_mode, from: "on", to: "off", id: "off"}
+  actions:
+    - choose:
+        - conditions: [{condition: trigger, id: "on"}]
+          sequence:
+            - action: scene.create
+              data: {scene_id: signal_before_party, snapshot_entities: "{{ lights }}"}
+            - action: light.turn_on
+              target: {entity_id: "{{ lights }}"}
+              data: {effect: Party, brightness: 255}
+        - conditions: [{condition: trigger, id: "off"}]
+          sequence:
+            # wait until a running notification is over, it would otherwise return to the party effect
+            - wait_template: "{{ sensors | select('is_state', 'none') | list | count == sensors | count }}"
+              timeout: "03:00:00"
+              continue_on_timeout: true
+            - if:
+                - condition: template
+                  value_template: "{{ states('scene.signal_before_party') not in ['unknown', 'unavailable'] }}"
+              then:
+                - action: scene.turn_on
+                  target: {entity_id: scene.signal_before_party}
+              else:
+                - action: light.turn_off
+                  target: {entity_id: "{{ lights }}"}
+
+- id: signal_wakeup
+  alias: "Signal: wake-up"
+  description: >-
+    After the alarm the rings fade yellow → turquoise → red over 45 minutes and then turn off.
+    Closing the bedroom blinds again turns them off right away.
+  mode: restart
+  variables:
+    lights: [light.hallway_signal_1_light]
+  triggers:
+    - {trigger: time, at: input_datetime.alarm}
+  conditions:
+    - {condition: state, entity_id: input_boolean.alarm_enabled, state: "on"}
+    - {condition: state, entity_id: input_boolean.away, state: "off"}
+  actions:
+    - action: light.turn_on
+      target: {entity_id: "{{ lights }}"}
+      data: {rgb_color: [255, 190, 0], brightness: 255, transition: 2}
+    - delay: {seconds: 3}
+    - action: light.turn_on
+      target: {entity_id: "{{ lights }}"}
+      data: {rgb_color: [0, 210, 190], brightness: 200, transition: 1350}
+    - wait_for_trigger:
+        - {trigger: state, entity_id: input_boolean.bedroom_blinds_closed, from: "off", to: "on"}
+      timeout: {seconds: 1350}
+      continue_on_timeout: true
+    - if:
+        - condition: template
+          value_template: "{{ wait.trigger is not none }}"
+      then:
+        - action: light.turn_off
+          target: {entity_id: "{{ lights }}"}
+          data: {transition: 2}
+        - stop: Blinds closed
+    - action: light.turn_on
+      target: {entity_id: "{{ lights }}"}
+      data: {rgb_color: [255, 0, 0], brightness: 230, transition: 1350}
+    - wait_for_trigger:
+        - {trigger: state, entity_id: input_boolean.bedroom_blinds_closed, from: "off", to: "on"}
+      timeout: {seconds: 1350}
+      continue_on_timeout: true
+    - if:
+        - condition: template
+          value_template: "{{ wait.trigger is not none }}"
+      then:
+        - action: light.turn_off
+          target: {entity_id: "{{ lights }}"}
+          data: {transition: 2}
+        - stop: Blinds closed
+    - action: light.turn_off
+      target: {entity_id: "{{ lights }}"}
+      data: {transition: 5}
