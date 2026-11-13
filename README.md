@@ -11,6 +11,11 @@ on its own when Home Assistant is unreachable.
 Build one per room; they all share the same package, so a change to an animation reaches every
 ring with the next OTA update.
 
+It is made for the 3D printed
+[WLED Status Lamp – Smart Home Notification Light](https://makerworld.com/en/models/3417805-wled-status-lamp-smart-home-notification-light#profileId-3893971)
+on MakerWorld, which is designed for WLED. This project replaces WLED with ESPHome so the lamp
+becomes a regular Home Assistant device with the notifications built in.
+
 ## Contents
 
 - [Features](#features)
@@ -49,7 +54,8 @@ ring with the next OTA update.
 
 ## Hardware
 
-Tested with:
+Tested with the [WLED Status Lamp](https://makerworld.com/en/models/3417805-wled-status-lamp-smart-home-notification-light#profileId-3893971)
+build:
 
 - Wemos/LOLIN **D1 mini** (ESP8266)
 - **16-LED WS2812 ring** (5 V, GRB)
