@@ -58,3 +58,50 @@ signal_clear_if:
       continue_on_error: true
       data:
         event: "{{ event }}"
+
+signal_notify:
+  alias: "Signal: free notification to all rings"
+  description: >-
+    Sends any color, pattern and notification name (esphome.<name>_notify2) to all signal rings,
+    except while nobody is home or everyone is asleep. Add new rings to the sequence.
+  icon: mdi:bell-ring-outline
+  mode: parallel
+  fields:
+    event: {name: Notification name, required: true, example: timer_red, selector: {text: }}
+    color: {name: Color, required: true, example: "[255, 0, 0]", selector: {color_rgb: }}
+    color2: {name: Second color, example: "[0, 0, 255]", selector: {color_rgb: }}
+    pattern:
+      name: Pattern
+      required: true
+      selector:
+        select:
+          options: [solid, blink, fastblink, whiteblink, duowhiteblink, pulse, slowpulse, spin, dot]
+    duration:
+      name: Duration (s, 0 = until cleared)
+      default: 0
+      selector:
+        number: {min: 0, max: 86400, unit_of_measurement: s}
+  sequence:
+    - condition: state
+      entity_id: input_boolean.away
+      state: "off"
+    - condition: state
+      entity_id: input_boolean.awake
+      state: "on"
+    - variables:
+        c2: "{{ color2 | default([255, 0, 0]) }}"
+    - action: esphome.hallway_signal_1_notify2
+      continue_on_error: true
+      data: &notify2
+        event: "{{ event }}"
+        red: "{{ color[0] }}"
+        green: "{{ color[1] }}"
+        blue: "{{ color[2] }}"
+        red2: "{{ c2[0] }}"
+        green2: "{{ c2[1] }}"
+        blue2: "{{ c2[2] }}"
+        pattern: "{{ pattern }}"
+        duration: "{{ duration | default(0) | int }}"
+    # - action: esphome.kitchen_signal_1_notify2
+    #   continue_on_error: true
+    #   data: *notify2
