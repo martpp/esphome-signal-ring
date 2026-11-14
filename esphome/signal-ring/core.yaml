@@ -3,7 +3,12 @@
 #
 # Home Assistant actions (per device, "-" in the name becomes "_"):
 #   esphome.<name>_notify    red/green/blue (0-255), pattern, duration (s, 0 = until cleared)
-#                            pattern: solid | blink | fastblink | pulse | slowpulse | spin | dot
+#                            pattern: solid | blink | fastblink | whiteblink | duowhiteblink | pulse |
+#                                     slowpulse | spin | dot
+#                            (whiteblink: color / white, duowhiteblink: color / white / second color / white)
+#   esphome.<name>_notify2   like notify, plus red2/green2/blue2 (second color for duowhiteblink and dot)
+#                            and event: name shown in the status sensor, usable with clear_if
+#                            (empty = "notify")
 #   esphome.<name>_event     event (preset, see the "event" action below), duration (s, 0 = until cleared)
 #                            event: print_done | print_error | washer_done | timer_done
 #   esphome.<name>_clear     end the notification and restore the previous light state
@@ -139,6 +144,22 @@ light:
             bool on = (millis() / 120) % 2 == 0;
             it.all() = on ? Color(id(n_r), id(n_g), id(n_b)) : Color::BLACK;
       - addressable_lambda:
+          name: "Notify White Blink"
+          update_interval: 50ms
+          lambda: |-
+            // color and white alternate (400 ms each), no dark phase
+            bool c = (millis() / 400) % 2 == 0;
+            it.all() = c ? Color(id(n_r), id(n_g), id(n_b)) : Color::WHITE;
+      - addressable_lambda:
+          name: "Notify Duo White Blink"
+          update_interval: 50ms
+          lambda: |-
+            // color, white, second color, white (400 ms each)
+            uint32_t ph = (millis() / 400) % 4;
+            if (ph == 0) it.all() = Color(id(n_r), id(n_g), id(n_b));
+            else if (ph == 2) it.all() = Color(id(n2_r), id(n2_g), id(n2_b));
+            else it.all() = Color::WHITE;
+      - addressable_lambda:
           name: "Notify Slow Pulse"
           update_interval: 30ms
           lambda: |-
@@ -207,6 +228,8 @@ script:
           effect: !lambda |-
             if (pattern == "blink") return std::string("Notify Blink");
             if (pattern == "fastblink") return std::string("Notify Fast Blink");
+            if (pattern == "whiteblink") return std::string("Notify White Blink");
+            if (pattern == "duowhiteblink") return std::string("Notify Duo White Blink");
             if (pattern == "slowpulse") return std::string("Notify Slow Pulse");
             if (pattern == "dot") return std::string("Notify Dot");
             if (pattern == "spin") return std::string("Notify Spin");
@@ -264,6 +287,29 @@ api:
             blue: !lambda return blue;
             pattern: !lambda return pattern;
             duration: !lambda return duration;
+    - action: notify2
+      variables:
+        event: string
+        red: int
+        green: int
+        blue: int
+        red2: int
+        green2: int
+        blue2: int
+        pattern: string
+        duration: int
+      then:
+        - lambda: |-
+            id(n2_r) = red2; id(n2_g) = green2; id(n2_b) = blue2;
+            id(cur_event) = event.empty() ? std::string("notify") : event;
+            id(active_event).publish_state(id(cur_event));
+        - script.execute:
+            id: notify_run
+            red: !lambda return red;
+            green: !lambda return green;
+            blue: !lambda return blue;
+            pattern: !lambda return pattern;
+            duration: !lambda return duration;
     - action: event
       variables:
         event: string
@@ -273,12 +319,13 @@ api:
             // Presets: color (r, g, b) and pattern; the second color (dot) is red
             int r = 255, g = 255, b = 255; std::string pat = "blink";
             id(n2_r) = 255; id(n2_g) = 0; id(n2_b) = 0;
-            if (event == "print_done")       { r = 0;   g = 255; b = 0;   pat = "slowpulse"; }
-            else if (event == "print_error") { r = 0;   g = 255; b = 0;   pat = "dot"; }
-            else if (event == "washer_done") { r = 0;   g = 0;   b = 255; pat = "slowpulse"; }
-            else if (event == "timer_done")  { r = 255; g = 255; b = 255; pat = "blink"; }
-            else ESP_LOGW("signal", "Unknown event '%s', using white blink", event.c_str());
-            id(cur_event) = event;
+            std::string ev = event;
+            if (ev == "print_done")       { r = 0;   g = 255; b = 0;   pat = "slowpulse"; }
+            else if (ev == "print_error") { r = 0;   g = 255; b = 0;   pat = "dot"; }
+            else if (ev == "washer_done") { r = 0;   g = 0;   b = 255; pat = "slowpulse"; }
+            else if (ev == "timer_done")  { r = 255; g = 255; b = 255; pat = "blink"; }
+            else ESP_LOGW("signal", "Unknown event '%s', using white blink", ev.c_str());
+            id(cur_event) = ev;
             id(active_event).publish_state(id(cur_event));
             id(notify_run)->execute(r, g, b, pat, duration);
     - action: clear_if

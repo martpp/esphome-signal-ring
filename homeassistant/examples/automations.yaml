@@ -2,6 +2,7 @@
 # Entity IDs are placeholders: replace them with yours (Developer tools → States).
 #
 # - Notifications: 3D printer (Bambu Lab integration), washer (SmartThings), timers
+# - Two timers: each in its own color, both colors when they overlap
 # - Party: party effect while a helper is on
 # - Wake-up: color fade after the alarm, ends when the bedroom blinds close again
 
@@ -50,6 +51,33 @@
           sequence: [{action: script.signal_event, data: {event: timer_done, duration: 60}}]
         - conditions: [{condition: trigger, id: quiet}]
           sequence: [{action: script.signal_clear_if, data: {event: ""}}]
+
+- id: signal_two_timers
+  alias: "Signal: two timers with their own color"
+  description: >-
+    Each timer blinks in its own color alternating with white. If the other timer is still
+    showing, the ring cycles both colors with white in between.
+  mode: queued
+  triggers:
+    - {trigger: event, event_type: timer.finished, event_data: {entity_id: timer.timer_red}}
+    - {trigger: event, event_type: timer.finished, event_data: {entity_id: timer.timer_blue}}
+  variables:
+    timers:
+      timer.timer_red: {name: timer_red, color: [255, 0, 0]}
+      timer.timer_blue: {name: timer_blue, color: [0, 0, 255]}
+    mine: "{{ timers[trigger.event.data.entity_id] }}"
+    other: "{{ timers[timers.keys() | reject('eq', trigger.event.data.entity_id) | first] }}"
+    shown: "{{ states('sensor.hallway_signal_1_notification') }}"
+  actions:
+    - if:
+        - condition: template
+          value_template: "{{ shown in [other.name, 'timer_both'] }}"
+      then:
+        - action: script.signal_notify
+          data: {event: timer_both, color: "{{ mine.color }}", color2: "{{ other.color }}", pattern: duowhiteblink, duration: 60}
+      else:
+        - action: script.signal_notify
+          data: {event: "{{ mine.name }}", color: "{{ mine.color }}", pattern: whiteblink, duration: 60}
 
 - id: signal_party
   alias: "Signal: party"

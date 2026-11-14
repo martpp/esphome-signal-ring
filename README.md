@@ -39,8 +39,9 @@ becomes a regular Home Assistant device with the notifications built in.
   | `timer_done` | white blink (300 ms) |
   | `ha_down` | red blink, raised by the ring itself when Home Assistant is unreachable |
 
-- **Free notifications** with any color and one of seven patterns: `solid`, `blink`,
-  `fastblink`, `pulse`, `slowpulse`, `spin`, `dot`
+- **Free notifications** with any color and one of nine patterns: `solid`, `blink`,
+  `fastblink`, `whiteblink` (color / white), `duowhiteblink` (color / white / second color /
+  white), `pulse`, `slowpulse`, `spin`, `dot`
 - **Restores the previous state** after a notification (on/off, color, brightness, effect),
   so a notification can play on top of a running effect
 - **Selective clearing**: end only the matching notification (`clear_if: print` leaves a washer
@@ -126,6 +127,7 @@ Every ring registers these actions (the device name with `-` replaced by `_`):
 |---|---|---|
 | `esphome.<name>_event` | `event`, `duration` | show a preset; `duration` in seconds, `0` until cleared |
 | `esphome.<name>_notify` | `red`, `green`, `blue`, `pattern`, `duration` | show any color with a pattern |
+| `esphome.<name>_notify2` | as `notify`, plus `red2`, `green2`, `blue2`, `event` | with a second color (`duowhiteblink`, `dot`) and an own name for the status sensor and `clear_if` |
 | `esphome.<name>_clear_if` | `event` | end the notification if the active one starts with this prefix |
 | `esphome.<name>_clear` | – | end any notification |
 
@@ -139,6 +141,12 @@ data:
 ```yaml
 action: esphome.hallway_signal_1_notify
 data: {red: 255, green: 120, blue: 0, pattern: spin, duration: 30}
+```
+
+```yaml
+action: esphome.hallway_signal_1_notify2
+data: {event: timer_both, red: 255, green: 0, blue: 0, red2: 0, green2: 0, blue2: 255,
+       pattern: duowhiteblink, duration: 60}
 ```
 
 The light entity can be used as a normal RGB light with the built-in effects (`Party`,
@@ -158,13 +166,14 @@ duration.
 [`homeassistant/examples/`](homeassistant/examples) contains what the blueprint does not cover:
 
 - [`scripts.yaml`](homeassistant/examples/scripts.yaml): `script.signal_event` and
-  `script.signal_clear_if` send to all rings at once and skip notifications while nobody is
+  `script.signal_clear_if` (and `script.signal_notify` for free notifications) send to all rings at once and skip notifications while nobody is
   home or everyone is asleep
 - [`automations.yaml`](homeassistant/examples/automations.yaml):
   - 3D printer (Bambu Lab): done, failed or paused; ends when the door opens or the next print starts
   - washer (SmartThings): done; ends when a door contact sensor reports the door open, or when
     the next wash starts (the machine itself switches off on its own and reports nothing about the door)
   - kitchen timer
+  - two timers, each blinking in its own color with white; both colors when they overlap
   - party mode: party effect while a helper is on, previous state restored afterwards
   - wake-up: yellow → turquoise → red over 45 minutes after the alarm, off when the blinds close again
 
